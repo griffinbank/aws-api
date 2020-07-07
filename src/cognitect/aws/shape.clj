@@ -82,7 +82,11 @@
   [shape data]
   (condp = (:timestampFormat shape)
     "rfc822"  (util/parse-date util/rfc822-date-format data)
-    "iso8601" (util/parse-date util/iso8601-date-format data)
+    "iso8601" (->> [util/iso8601-date-format
+                    util/iso8601-msecs-date-format]
+                   (map #(try (util/parse-date % data) (catch java.text.ParseException _ nil)))
+                   (filter identity)
+                   first)
     (cond (int? data)
           (java.util.Date. (* 1000 ^int data))
           (double? data)
