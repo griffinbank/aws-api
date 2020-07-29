@@ -24,7 +24,7 @@
   Throws if args is missing any keys that are required in input-shape.
 
   Example URI template: /{Bucket}/{Key}"
-  [uri-template {:keys [required] :as input-shape} args]
+  [uri-template {:keys [required] :as input-shape} args encoding-fn]
   (str/replace uri-template
                #"\{([^}]+)\}"
                (fn [[_ param]]
@@ -37,7 +37,8 @@
                                remove-leading-slash)
                        (some-> args
                                (get (keyword param))
-                               util/uri-encode
+                               str
+                               (encoding-fn)
                                remove-leading-slash))
                      ;; TODO (dchelimsky 2019-02-08) it's possible that 100% of
                      ;; params in templated URIs are required, in which case
@@ -165,21 +166,26 @@
   (let [operation        (get operations op)
         input-shape-name (-> operation :input :shape)
         input-shape      (service/shape service (:input operation))
+        uri-template     (get-in operation [:http :requestUri])
         http-request     {:request-method (-> operation :http :method str/lower-case keyword)
                           :scheme         :https
                           :server-port    443
-                          :uri            (get-in operation [:http :requestUri])
+                          :uri            uri-template
                           :headers        (common/headers service operation)}]
     (if-not input-shape
       http-request
       (let [location->args (partition-args input-shape request)
-            body-args      (:body location->args)]
+            body-args      (:body location->args)
+            canonical-encode #(if (= (:cognitect.aws/service-name metadata) "s3")
+                                (-> % util/uri-encode)
+                                (-> % util/uri-encode util/uri-encode))]
         (-> http-request
-            (update :uri serialize-uri input-shape (:uri location->args))
+            (update :uri serialize-uri input-shape (:uri location->args) util/uri-encode)
             (update :uri append-querystring input-shape (:querystring location->args))
             (update :headers merge (serialize-headers input-shape (merge (location->args :header)
                                                                          (location->args :headers))))
-            (assoc :body (serialize-body input-shape-name input-shape body-args serialize-body-args)))))))
+            (assoc :body (serialize-body input-shape-name input-shape body-args serialize-body-args))
+            (assoc :canonical-uri (serialize-uri uri-template input-shape (:uri location->args) canonical-encode)))))))
 
 ;; ----------------------------------------------------------------------------------------
 ;; Parser

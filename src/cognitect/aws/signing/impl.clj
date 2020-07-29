@@ -30,24 +30,10 @@
   [request-method]
   (-> request-method name str/upper-case))
 
-(defn s3-uri-encoder [path]
-  (util/uri-encode path :exclude-slashes))
-
-(defn default-uri-encoder [uri]
-  (-> uri
-      (str/replace #"//+" "/")  ; (URI.) throws Exception on '//'.
-      (str/replace #"\s" "%20") ; (URI.) throws Exception on space.
-      (URI.)
-      (.normalize)
-      (.getPath)                ; decodes %20 back to space
-      (util/uri-encode :exclude-slashes)))
-
-(defn- canonical-uri
-  [uri uri-encoder]
-  (let [encoded-uri (uri-encoder uri)]
-    (if (.isEmpty ^String encoded-uri)
-      "/"
-      encoded-uri)))
+(defn- canonical-uri [{:keys [canonical-uri]}]
+  (if (or (nil? canonical-uri) (.isEmpty ^String canonical-uri))
+    "/"
+    canonical-uri))
 
 (defn- canonical-query-string
   [{:keys [query-string]}]
@@ -109,13 +95,13 @@
              headers))
 
 (defn- add-canonical-request
-  [{{:keys [request-method uri headers body] :as request} :req
+  [{{:keys [request-method headers body] :as request} :req
     :keys [hashed-body]
     :as context}]
   (assoc context
          :canonical-request
          (str/join "\n" [(canonical-method request-method)
-                         (canonical-uri uri (:uri-encoder context))
+                         (canonical-uri request)
                          (canonical-query-string request)
                          (canonical-headers-string headers)
                          (signed-headers-string headers)
@@ -218,19 +204,16 @@
 (defmethod signing/sign-http-request "s3"
   [service endpoint credentials http-request]
   (v4-sign-http-request service endpoint credentials http-request
-                        :content-sha256-header? true
-                        :uri-encoder s3-uri-encoder))
+                        :content-sha256-header? true))
 
 (defmethod signing/sign-http-request "v4"
   [service endpoint credentials http-request]
-  (v4-sign-http-request service endpoint credentials http-request
-                        :uri-encoder default-uri-encoder))
+  (v4-sign-http-request service endpoint credentials http-request))
 
 ;; The only service that uses s3v4 is s3-control. aws-sdk-js assigns the v4 signer for this
 (defmethod signing/sign-http-request "s3v4"
   [service endpoint credentials http-request]
-  (v4-sign-http-request service endpoint credentials http-request
-                        :uri-encoder default-uri-encoder))
+  (v4-sign-http-request service endpoint credentials http-request))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; PRESIGN
@@ -268,13 +251,9 @@
       (update :req format-request)
       (update :req assoc :body "UNSIGNED-PAYLOAD")))
 
-(defn add-s3-uri-encoder [context]
-  (assoc context :uri-encoder s3-uri-encoder))
-
 (defmethod signing/presigned-url "s3"
   [initial-context]
   (-> initial-context
-      add-s3-uri-encoder
       prepare-request-for-presign
       extract-amz-date
       dissoc-amz-date
