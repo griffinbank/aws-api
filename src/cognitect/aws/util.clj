@@ -104,6 +104,13 @@
     (io/copy is os)
     (.toByteArray os)))
 
+(defn input-stream->str
+  "Creates a string from a java.io.InputStream object.
+   The encoding is fixed to UTF-8."
+  [^InputStream is]
+  (when-let [bytes ^bytes (input-stream->byte-array is)]
+    (String. bytes "UTF-8")))
+
 (defn bbuf->bytes
   [^ByteBuffer bbuf]
   (when bbuf

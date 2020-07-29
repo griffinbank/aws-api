@@ -38,5 +38,8 @@
   (parse-error* http-response (some-> body util/xml-read util/xml->map)))
 
 (defn json-parse-error
-  [{:keys [body] :as http-response}]
-  (parse-error* http-response (some-> body (json/read :key-fn keyword))))
+  [{:keys [body response-body-as] :as http-response}]
+  (case response-body-as
+    ;; response-body-as can be :chan or :inputstream
+    :inputstream (parse-error* http-response (some-> body util/input-stream->str (json/read-str :key-fn keyword)))
+    :chan (parse-error* http-response (some-> body util/bbuf->str (json/read-str :key-fn keyword)))))
