@@ -136,15 +136,28 @@
 (defstep test-send-request [context]
   (let [{:keys [api op test-handler]} context
         service (service/service-description (name api))
-        response-spec (or (service/response-spec-key service op) (s/spec any?))
-        default-handler (fn [request] (when response-spec
-                                        (gen/generate (s/gen response-spec))))]
-    (if test-handler
-      (let [response (test-handler default-handler context)]
-        (if-let [error (s/explain-data response-spec response)]
-          (throw (ex-info "test response did not conform" error))
-          response))
-      (default-handler context))))
+        response-spec (or (service/response-spec-key service op) (s/with-gen (s/spec map?) #(gen/return {})))
+        ;; response-gen must return truthy because this is going into a core.async channel
+        response-gen (gen/such-that identity (s/gen response-spec))
+        default-handler (fn [request]
+                          (try
+                            (gen/generate response-gen)
+                            (catch Exception e
+                              (ex-info (print-str "while generating" response-spec) {:spec response-spec} e))))
+        handler (fn [context]
+                  (if test-handler
+                    (test-handler default-handler context)
+                    (default-handler context)))]
+    (let [response (handler context)
+          error (s/explain-data response-spec response)]
+      (assert (or response error))
+      (when-not error (assert response))
+      (or
+       (when (:cognitect.anomalies/category response)
+         response)
+       (when error
+         (assoc error :cognitect.anomalies/category :cognitect.anomalies/incorrect))
+       response))))
 
 (def test-stack
   [load-service              ;; resolution
